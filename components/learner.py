@@ -150,33 +150,45 @@ class Learner(DataModeler):
         print(f"{model_name} End of training, avg metric: {np.mean(metric_l)}")
         return df.pop('pred')
     
-    def _single_predict(self, df:pd.DataFrame, num_feats:List[str], cat_feats:List[str], model_name:str) -> np.array:
+    def _single_predict(self, df:pd.DataFrame, num_feats:List[str], cat_feats:List[str], model_name:str, is_train=False) -> np.array:
         """
         Use single model to predict
         @param df: testset
         @param num_feats: numerical features used for training mdoel
         @param cat_feats: categorical features used for training model (*only supported with LGB model)
         @param model_name: model name, must be one of keys in model_dict and has been trained
+        @param is_train: if the input data is trainset
         return: prediction
         """
         pred_l = []
-
+        if is_train:
+            df = DataPreprocessor.create_folds(df, len(self.model_dict[model_name]['model']))
+            df[model_name] = 0
+        else:
+            df['fold'] = -1
         for i,model in enumerate(self.model_dict[model_name]['model']):
+            mask = (df['fold'] == -1) | (df['fold'] == i)
             if model_name not in ['LGB', 'XGB', 'CAT']:
-                pred_l.append(model.predict(df[num_feats].fillna(0)).tolist())
+                pred = model.predict(df[num_feats][mask].fillna(0)).tolist()
             elif model_name == 'LGB':
-                pred_l.append(model.predict(df[num_feats+cat_feats], num_iteration=model.best_iteration).tolist())
+                pred = model.predict(df[num_feats+cat_feats][mask], num_iteration=model.best_iteration).tolist()
             elif model_name == 'XGB':
-                pred_l.append(model.predict(xgb.DMatrix(df[num_feats]), ntree_limit=model.best_ntree_limit).tolist())
+                pred = model.predict(xgb.DMatrix(df[num_feats][mask]), ntree_limit=model.best_ntree_limit).tolist()
             elif model_name == 'CAT':
                 df_ = df.copy()
                 df_[cat_feats] = df_[cat_feats].astype('str')
-                pred_l.append(model.predict(df_[num_feats+cat_feats].values).tolist())
-
-        pred = np.mean(np.array(pred_l), axis=0)
+                pred = model.predict(df_[num_feats+cat_feats][mask].values).tolist()
+            if is_train:
+                df[model_name][df['fold']==i] = pred
+            else:
+                pred_l.append(pred)
+        if is_train:
+            pred = df.pop(model_name).values
+        else:
+            pred = np.mean(np.array(pred_l), axis=0)
         return pred
     
-    def predict(self, df:pd.DataFrame, num_feats:List[str], cat_feats:List[str], models:List[str]=None, weights:List[float]=None) -> np.array:
+    def predict(self, df:pd.DataFrame, num_feats:List[str], cat_feats:List[str], models:List[str]=None, weights:List[float]=None, is_train=False) -> np.array:
         """
         Use all the models that have been trained before to predict
         @param df: testset
@@ -184,13 +196,13 @@ class Learner(DataModeler):
         @param cat_feats: categorical features used for training model (*only supported with LGB model)
         @param models: dict of model names to predict {model_name:weight}, if None then use all models
         @param weights: weights of models when embedding results of different models
+        @param is_train: if the input data is trainset
         return: prediction
         """
         if models is not None:
             for m in models:
                 assert m in self.model_dict.keys() and len(self.model_dict[m]['model'])>0, f"{m} is not trained."
 
-        pred_l = []
         if models is None:
             #* if models are not assigned then use all trained models
             models = [x for x in self.model_dict.keys() if len(self.model_dict[x]['model'])>0]
@@ -198,8 +210,9 @@ class Learner(DataModeler):
             #* if weight is not assigned then take avg as default
             weights = [1/len(models) for _ in models]
 
+        pred_l = []
         for i,model in tqdm(enumerate(models), "Predicting"):
-            tmp = self._single_predict(df, num_feats, cat_feats, model) * weights[i]
+            tmp = self._single_predict(df, num_feats, cat_feats, model, is_train) * weights[i]
             pred_l.append(tmp.tolist())
         
         pred = np.sum(np.array(pred_l), axis=0)

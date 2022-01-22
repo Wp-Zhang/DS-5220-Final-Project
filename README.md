@@ -1,5 +1,6 @@
 ﻿# DS-5220-Final-Project
 *Team Member: Weipeng Zhang, Aravindh Gowtham Bommisetty, Sai Vineeth Kaza*
+*Code Author: Weipeng Zhang*
 
 - The notebook named `US Used Car Price Prediciton.ipynb` contains the full version of our code. Running the cells in order will do all the operations we did that were presented in our final presentation and report.
 
